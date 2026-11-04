@@ -1,0 +1,17 @@
+# Digital Commons terminal configuration.
+#
+# This file holds client settings only. It must never contain a model-server
+# URL, because the terminal talks only to the gateway.
+# Tokens never belong here. Use the DC_GATEWAY_TOKEN environment variable.
+
+application:
+  default_mode: basic   # basic | developer
+
+gateway:
+  # Point this at the organization's gateway to switch away from local mode.
+  base_url: http://127.0.0.1:8000
+  allow_insecure_http: false   # Permits http to a non-loopback gateway. Labs only.
+
+appearance:
+  theme: auto   # auto | dark | light
+  mouse: true

@@ -1,0 +1,38 @@
+# Toolchains and build output
+.tools/
+bin/
+dist/
+
+# Python
+backend/.venv/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# Runtime data: conversations, audit events, pid and log files
+data/runtime/
+.run/
+*.db
+*.db-shm
+*.db-wal
+*.log
+
+# Local overrides and secrets. Never commit real tokens.
+.env
+.env.*
+!.env.example
+config/*.local.yaml
+# The terminal saves theme and mouse choices next to the terminal.yaml it loaded.
+config/state.json
+
+# Editors and OS files
+.idea/
+.vscode/
+Thumbs.db
+.DS_Store
+
+# Node and browser tooling
+node_modules/
+.playwright-mcp/

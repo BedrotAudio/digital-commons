@@ -1,0 +1,139 @@
+# Digital Commons gateway configuration for a single development computer.
+#
+# Local overrides go in config/development.local.yaml, which git ignores.
+# Environment overrides: DC_CONFIG, DC_MODELS_CONFIG, DC_PROVIDER, DC_DATA_DIR.
+# Secrets never belong in this file. Name an environment variable instead.
+
+application:
+  name: Digital Commons
+  stage: beta
+  notice: Beta software. Not approved for production use or sensitive data.
+
+gateway:
+  host: 127.0.0.1   # Beta 1 refuses any non-loopback address.
+  port: 8000
+  docs_enabled: false
+
+storage:
+  # Empty means the platform default: %LOCALAPPDATA%\DigitalCommons on Windows,
+  # ~/Library/Application Support/DigitalCommons on macOS,
+  # ~/.local/state/digital-commons on Linux. Must be absolute when set.
+  data_dir:
+
+inference:
+  default_provider: ollama   # ollama | mock | org_server
+  max_concurrent_requests: 1 # One at a time suits CPU-only inference.
+  max_queued_requests: 8
+  warm_on_start: true        # Load the Standard model before the first message.
+
+providers:
+  ollama:
+    kind: ollama
+    base_url: http://127.0.0.1:11434
+    display_name: Ollama
+    keep_alive: 30m             # Reloading took over 3 minutes on the test machine.
+    connect_timeout_s: 3
+    first_token_timeout_s: 900  # From dispatch, after any queue wait. Covers a cold
+                                # load plus reading a full document on a CPU.
+    stream_idle_timeout_s: 120  # Applies only after the first chunk.
+
+  mock:
+    kind: mock
+    display_name: Demonstration
+    tokens_per_second: 40
+
+  # Organization model server. To switch: set default_provider to org_server, set
+  # base_url, add its host to allowed_upstream_hosts, export DC_ORG_SERVER_TOKEN.
+  org_server:
+    kind: inference_api
+    base_url: https://ai.example.gov
+    display_name: Organization server
+    token_env: DC_ORG_SERVER_TOKEN
+    ca_bundle:                  # Optional path to an organization CA certificate.
+    connect_timeout_s: 5
+    stream_idle_timeout_s: 30   # The server's pings keep this alive.
+
+# Lets this gateway stand in for the organization model server, for testing.
+inference_service:
+  enabled: false
+  token_env: DC_SERVICE_TOKEN
+
+security:
+  # Every non-loopback provider host must be listed here. This guards against
+  # misconfiguration. It does not stop someone who can edit this file.
+  allowed_upstream_hosts: []
+  # Host headers the gateway answers to. This covers DNS rebinding only. Requests
+  # from web pages are refused separately by their Origin header.
+  allowed_client_hosts:
+    - 127.0.0.1
+    - localhost
+
+identity:
+  mode: local   # local | shared_token
+  # local: a token generated on first start, kept in the data folder.
+  # shared_token: read from token_env. One token is one person. Interim only.
+  token_env: DC_GATEWAY_TOKEN
+  user:
+    user_id: local.developer
+    display_name: Local Developer
+    groups: [all-staff, finance]
+    permissions:
+      advanced_mode: true
+      manual_model_selection: true
+      view_diagnostics: true
+      search_documents: true
+      allowed_tiers: [fast, standard, advanced]
+
+conversations:
+  retention_days: 30   # Older conversations are removed. 0 keeps them.
+
+logging:
+  level: INFO
+
+documents:
+  path: data/sample_documents
+  max_results: 4
+
+limits:
+  max_message_chars: 15000
+  max_attachments: 4
+  max_attachment_bytes: 262144
+  attachment_extensions: [.txt, .md, .csv, .tsv]
+
+# Reduce or reword these for your organization. Actions are defined in docs/api.md.
+suggestions:
+  - id: summarize
+    title: Summarize a document
+    subtitle: Get the key points quickly
+    action: attach
+    prompt: Summarize this document. List the key points and any deadlines or actions required.
+  - id: compare
+    title: Compare two policies
+    subtitle: See what changed
+    action: attach_two
+    prompt: Compare these two documents. Show what changed and why it matters.
+  - id: draft
+    title: Draft correspondence
+    subtitle: Letters, emails and memos
+    action: prompt
+    prompt: "Help me draft a professional message to "
+  - id: explain
+    title: Explain a regulation
+    subtitle: In plain language
+    action: prompt
+    prompt: "Explain this regulation in plain language: "
+  - id: find
+    title: Find information
+    subtitle: Search approved documents
+    action: documents
+    prompt: ""
+  - id: spreadsheet
+    title: Analyze a spreadsheet
+    subtitle: Saved as CSV
+    action: attach
+    prompt: Analyze this spreadsheet. Describe what it contains, the notable patterns and anything unusual.
+  - id: brainstorm
+    title: Brainstorm solutions
+    subtitle: Work through a problem
+    action: prompt
+    prompt: "Help me brainstorm solutions to this problem: "

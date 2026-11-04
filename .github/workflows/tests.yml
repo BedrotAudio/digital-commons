@@ -1,0 +1,178 @@
+# Runs every test on real Mac, Windows and Ubuntu machines, on each push to main and
+# each pull request. To run it by hand: gh workflow run tests.yml
+# Actions are pinned to exact commits so an upstream change cannot alter what runs here.
+
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Mac Apple Silicon
+            runner: macos-latest
+            python: python3
+          - name: Mac Intel
+            runner: macos-26-intel
+            python: python3
+          - name: Windows
+            runner: windows-latest
+            python: python
+          - name: Ubuntu
+            runner: ubuntu-latest
+            python: python3
+    env:
+      GOTOOLCHAIN: local
+      CGO_ENABLED: "0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27.3"
+          cache-dependency-path: terminal/go.sum
+
+      - name: Set up
+        run: ${{ matrix.python }} dc.py setup
+
+      - name: Report on this machine
+        run: ${{ matrix.python }} dc.py doctor
+        continue-on-error: true # Ollama is not installed here, so doctor reports a failure.
+
+      - name: Run the tests
+        run: ${{ matrix.python }} dc.py test
+
+      - name: Cross-compile the terminal
+        run: ${{ matrix.python }} dc.py build --all
+
+      - name: Run the real terminal against the real gateway
+        working-directory: terminal
+        env:
+          DC_E2E: "1"
+          DC_E2E_SCREENS: ${{ github.workspace }}/screens
+        run: go test ./internal/e2e/ -count=1 -v -timeout 20m
+
+      - name: Keep the captured screens
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: screens-${{ matrix.runner }}
+          path: screens
+          if-no-files-found: ignore
+          retention-days: 7
+
+  mac-cloud-gate:
+    # Checks the cloud gate against a real Ollama, in both directions. While Ollama
+    # reports cloud access on, the gateway must report unavailable, refuse a chat and
+    # load no model. After dc.py setup turns cloud access off and Ollama restarts, one
+    # real chat must run on this device. It cannot catch an Ollama that reports cloud
+    # access off while it is on. tinyllama stands in for the configured model, which
+    # is far too large for a runner.
+    name: Cloud gate on a real Mac
+    runs-on: macos-latest
+    timeout-minutes: 40
+    env:
+      GOTOOLCHAIN: local
+      CGO_ENABLED: "0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27.3"
+          cache-dependency-path: terminal/go.sum
+
+      - name: Choose the folders for this run
+        run: |
+          echo "DC_DATA_DIR=$RUNNER_TEMP/dc-data" >> "$GITHUB_ENV"
+          echo "DC_MODELS_CONFIG=$GITHUB_WORKSPACE/tests/ci/models-tiny.yaml" >> "$GITHUB_ENV"
+
+      - name: Install Ollama
+        run: brew install ollama
+
+      - name: Start Ollama
+        run: |
+          nohup ollama serve > "$RUNNER_TEMP/ollama-before.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/ollama.pid"
+          curl --silent --fail --output /dev/null --retry 30 --retry-delay 1 --retry-connrefused \
+            http://127.0.0.1:11434/api/version
+
+      - name: Download a small model
+        timeout-minutes: 15
+        run: ollama pull tinyllama
+
+      - name: Set up, leaving Ollama cloud access on
+        # With nobody to answer, setup explains the cloud setting and changes nothing.
+        run: python3 dc.py setup < /dev/null
+
+      - name: Start the gateway while cloud access is on
+        run: |
+          nohup python3 dc.py backend > "$RUNNER_TEMP/gateway-before.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/backend.pid"
+          curl --silent --fail --output /dev/null --retry 60 --retry-delay 1 --retry-connrefused \
+            http://127.0.0.1:8000/healthz
+
+      - name: Check that chat is refused while cloud access is on
+        timeout-minutes: 5
+        run: python3 tests/ci/live_check.py --cloud-on --wait 120
+
+      - name: Stop that gateway
+        timeout-minutes: 2
+        run: |
+          python3 dc.py stop
+          while kill -0 "$(cat "$RUNNER_TEMP/backend.pid")" 2>/dev/null; do sleep 1; done
+
+      - name: Turn off Ollama cloud access
+        run: python3 dc.py setup --disable-ollama-cloud
+
+      - name: Restart Ollama, so it reads the setting
+        timeout-minutes: 2
+        run: |
+          kill "$(cat "$RUNNER_TEMP/ollama.pid")"
+          while curl --silent --output /dev/null http://127.0.0.1:11434/api/version; do sleep 1; done
+          nohup ollama serve > "$RUNNER_TEMP/ollama-after.log" 2>&1 &
+          curl --silent --fail --output /dev/null --retry 30 --retry-delay 1 --retry-connrefused \
+            http://127.0.0.1:11434/api/version
+
+      - name: Start the gateway again
+        run: |
+          nohup python3 dc.py backend > "$RUNNER_TEMP/gateway-after.log" 2>&1 &
+          curl --silent --fail --output /dev/null --retry 60 --retry-delay 1 --retry-connrefused \
+            http://127.0.0.1:8000/healthz
+
+      - name: Check the status and one real chat
+        timeout-minutes: 20
+        run: python3 tests/ci/live_check.py
+
+      - name: Stop the gateway
+        if: always()
+        run: python3 dc.py stop
+
+      - name: Show the logs
+        if: failure()
+        run: tail -n 80 "$RUNNER_TEMP"/ollama-*.log "$RUNNER_TEMP"/gateway-*.log

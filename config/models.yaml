@@ -1,0 +1,96 @@
+# Digital Commons model catalog.
+#
+# Each provider lists what its tiers mean. The active provider is chosen by
+# inference.default_provider in development.yaml or by DC_PROVIDER.
+# To use another model, run `ollama pull <name>` and change a `name` below. If that
+# model cannot reason (no "thinking" capability), also set `think: false` on the
+# advanced tier, or Ollama refuses every request to it.
+#
+# Fields
+#   name         Model name as the provider knows it.
+#   context      Context window in tokens. Tiers that share a model must share
+#                this value, because Ollama reloads a model when it changes.
+#   max_output   Tokens reserved for the reply. The rest of the context is the
+#                budget for the system prompt, history, documents and the message.
+#   temperature  Lower is more consistent. Higher is more varied.
+#   think        Whether reasoning is on. It helps with hard problems and costs a
+#                long wait on CPU-only computers. Automatic routing never selects a
+#                tier with think on, so it is always a manual choice.
+
+tiers:
+  fast:
+    label: Fast
+    description: Quick questions and simple tasks
+  standard:
+    label: Standard
+    description: General everyday work
+  advanced:
+    label: Advanced
+    description: Complex reasoning and coding
+  specialist:
+    label: Specialist
+    description: Reserved for a future Mixture of Experts server
+    enabled: false
+
+catalog:
+  ollama:
+    fast:
+      name: Gemma4:12b
+      context: 8192
+      max_output: 1024
+      temperature: 0.3
+      think: false
+    standard:
+      name: Gemma4:12b
+      context: 8192
+      max_output: 2048
+      temperature: 0.4
+      think: false
+    advanced:
+      name: Gemma4:12b
+      context: 8192
+      max_output: 4096
+      temperature: 0.3
+      think: true
+
+  mock:
+    fast:
+      name: demo-fast
+      context: 8192
+      max_output: 1024
+      temperature: 0.0
+      think: false
+    standard:
+      name: demo-standard
+      context: 8192
+      max_output: 2048
+      temperature: 0.0
+      think: false
+    advanced:
+      name: demo-advanced
+      context: 8192
+      max_output: 4096
+      temperature: 0.0
+      think: true
+
+  # The organization server maps each tier to its own model, so `name` is only a
+  # label here. The gateway still needs context and max_output to assemble prompts.
+  org_server:
+    fast:
+      name: organization-fast
+      context: 32768
+      max_output: 2048
+      temperature: 0.3
+      think: false
+    standard:
+      name: organization-standard
+      context: 32768
+      max_output: 4096
+      temperature: 0.4
+      think: false
+    advanced:
+      name: organization-advanced
+      context: 32768
+      max_output: 8192
+      temperature: 0.3
+      think: false

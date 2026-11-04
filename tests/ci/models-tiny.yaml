@@ -1,0 +1,59 @@
+# The model catalog for the live check in .github/workflows/tests.yml. Every tier
+# uses tinyllama, which is small enough for a CI runner with no graphics hardware.
+# The short output limit keeps a slow computer from spending minutes on one reply.
+
+tiers:
+  fast:
+    label: Fast
+    description: Quick questions and simple tasks
+  standard:
+    label: Standard
+    description: General everyday work
+  advanced:
+    label: Advanced
+    description: Complex reasoning and coding
+  specialist:
+    label: Specialist
+    description: Reserved for a future Mixture of Experts server
+    enabled: false
+
+catalog:
+  ollama:
+    fast:
+      name: tinyllama
+      context: 2048
+      max_output: 48
+      temperature: 0.3
+      think: false
+    standard:
+      name: tinyllama
+      context: 2048
+      max_output: 48
+      temperature: 0.3
+      think: false
+    advanced:
+      name: tinyllama
+      context: 2048
+      max_output: 48
+      temperature: 0.3
+      think: false
+
+  mock:
+    fast:
+      name: demo-fast
+      context: 2048
+      max_output: 48
+      temperature: 0.0
+      think: false
+    standard:
+      name: demo-standard
+      context: 2048
+      max_output: 48
+      temperature: 0.0
+      think: false
+    advanced:
+      name: demo-advanced
+      context: 2048
+      max_output: 48
+      temperature: 0.0
+      think: false
