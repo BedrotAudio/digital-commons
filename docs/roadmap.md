@@ -70,11 +70,11 @@ What Beta 1 has not shown:
 
 In order. Each step should leave the beta working.
 
-1. **Run on a Mac.** Run `python3 dc.py setup`, `doctor`, `demo` and `test` on an Apple
-   Silicon Mac and an Intel Mac, and fix what fails. Check the macOS terminals named in
-   [architecture.md](architecture.md), the data folder rules, and the messages that name a
-   command or a folder, following [mac-checklist.md](mac-checklist.md). This is a
-   requirement of the owner, not an extra.
+1. **Use it at a real Mac.** GitHub's Apple Silicon and Intel Mac machines already pass
+   every automated test. What remains needs a person: follow the README's macOS steps,
+   including Homebrew, then work through [mac-checklist.md](mac-checklist.md) in the
+   macOS terminals named in [architecture.md](architecture.md), and time replies with a
+   real model on Apple Silicon. This is a requirement of the owner, not an extra.
 2. **Run a long session with the real model.** On both platforms, hold a long conversation
    with `Gemma4:12b` or its replacement, with attachments and document search, and record
    timings. Settle the tier defaults and the router's thresholds from what is measured.
