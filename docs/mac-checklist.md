@@ -1,10 +1,10 @@
 # Mac checklist
 
-`.github/workflows/tests.yml` is set up to run the tests on GitHub's Mac machines,
-including the real terminal in a pseudo terminal, and the cloud gate against a real
-Ollama and a real small model. No result is recorded yet. Those machines have no screen,
-keyboard, mouse or permission dialogs, so these checks need a person at a real Mac. None
-of them has been done yet.
+`.github/workflows/tests.yml` runs the tests on GitHub's Mac machines, Apple Silicon and
+Intel, including the real terminal in a pseudo terminal, and the cloud gate against a
+real Ollama and a real small model. All of it passes there. Those machines have no
+screen, keyboard, mouse or permission dialogs, so these checks need a person at a real
+Mac. None of them has been done yet.
 
 Set up first with `python3 dc.py setup`, then use `python3 dc.py demo` for everything
 below unless a step says otherwise. Note the macOS version, the chip, and each

@@ -39,8 +39,8 @@ organization server, not a workstation target.
 | Platform | What has been run |
 |---|---|
 | Windows 11 | The gateway and terminal tests, the `dc.py` tooling tests, and the terminal end to end test through a Windows pseudo console all pass. The end to end test runs `dc.py dev`, `demo`, `backend` and `frontend` for real, and covers the organization relay, a gateway restart, Ollama with cloud access on, and Ollama not answering, using a stand-in for Ollama. Replies from the configured model on a CPU-only computer were measured, and the figures are in [docs/architecture.md](docs/architecture.md). |
-| macOS (Apple Silicon and Intel) | **Not run yet.** There is no Mac here, so macOS has only been checked by compiling for it and by reading the code. The code has macOS paths for the data folder, keys, messages and `dc.py`. `.github/workflows/tests.yml` is set up to run every test on Mac runners, including the real terminal in a pseudo terminal, and a separate job that checks the cloud gate against a real Ollama: chat must be refused while Ollama reports cloud access on, and must work with a real small model after `setup` turns it off. No result from a Mac is recorded here, so treat the macOS steps below as unverified. [docs/mac-checklist.md](docs/mac-checklist.md) lists what only a person at a real Mac can confirm. |
-| Linux | Not a workstation target. `.github/workflows/tests.yml` is set up to run the tests on Ubuntu, but no result is recorded here. |
+| macOS (Apple Silicon and Intel) | GitHub's Mac machines pass every automated test: the gateway, tooling and terminal tests, and the real terminal in a pseudo terminal against the real gateway. A separate job installs Ollama with Homebrew and leaves its cloud access on: the gateway reports it, refuses chat, stores nothing and loads no model. It then turns cloud access off with `python3 dc.py setup --disable-ollama-cloud` and gets a reply from a small real model through the gateway. Those machines install Python and Go with GitHub's own setup steps rather than Homebrew, and have no screen, keyboard or permission dialogs, so no person has used it at a real Mac yet. [docs/mac-checklist.md](docs/mac-checklist.md) lists what still needs one. |
+| Linux | Not a workstation target. GitHub's Ubuntu machine passes every automated test, including the real terminal in a pseudo terminal. |
 
 ## Requirements
 
@@ -116,7 +116,7 @@ the computer is set to skip the current folder when looking for programs.
 
 ## Install and start on macOS
 
-These steps have not been run on a Mac yet. See [Platform status](#platform-status).
+GitHub's Mac machines run `python3 dc.py setup`, `doctor` and `test` successfully, but no person has followed these steps at a real Mac yet, and the Homebrew step is unverified. See [Platform status](#platform-status).
 
 1. Install Python 3.11 or newer and Go. With [Homebrew](https://brew.sh):
 

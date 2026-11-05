@@ -57,10 +57,11 @@ The tooling:
 
 What Beta 1 has not shown:
 
-- Nothing has been run on a Mac. The macOS code paths are written and the workflow is
-  configured, and no result is recorded. [mac-checklist.md](mac-checklist.md) lists what
-  needs a person at a real Mac.
-- Nothing has been run on Linux. The workflow is configured, and no result is recorded.
+- No person has used it at a real Mac. GitHub's Mac machines (Apple Silicon and
+  Intel) pass every automated test and the cloud gate check with a real small model,
+  but they have no screen, keyboard or permission dialogs.
+  [mac-checklist.md](mac-checklist.md) lists what needs a person at a real Mac.
+- Linux is tested only on GitHub's Ubuntu machine, where every automated test passes.
 - There has been no review by a security tester.
 - A few interactions need a person at a keyboard: Shift+Enter in Windows Terminal, paste from
   the real clipboard, and copying through the terminal's clipboard escape sequence.
