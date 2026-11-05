@@ -25,13 +25,12 @@ _MAX_ADDRESSES = 16
 
 
 def local_ipv4_addresses() -> list[str]:
-    """This computer's non-loopback IPv4 addresses. No traffic leaves the machine."""
+    """This computer's non-loopback IPv4 addresses. No traffic leaves the machine.
+
+    The host name is never resolved: on a Mac that lookup can stall for many seconds,
+    which held up the whole privacy panel.
+    """
     found: set[str] = set()
-    try:
-        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
-            found.add(str(info[4][0]))
-    except OSError:
-        pass
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
             # Connecting a UDP socket only selects a route. 192.0.2.1 is a reserved test address.

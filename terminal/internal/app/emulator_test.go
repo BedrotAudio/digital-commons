@@ -1,7 +1,9 @@
 package app
 
 import (
+	"bytes"
 	"io"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -63,7 +65,11 @@ func TestRawOutputThroughTheEmulator(t *testing.T) {
 	screen := &lockedEmulator{em: vt.NewEmulator(100, 30)}
 	go io.Copy(keys, screen.em)
 	rec := &recorder{Model: d.m}
-	program := tea.NewProgram(rec, tea.WithInput(in), tea.WithOutput(screen), tea.WithWindowSize(100, 30),
+	var out io.Writer = screen
+	if runtime.GOOS != "windows" {
+		out = onlcr{screen}
+	}
+	program := tea.NewProgram(rec, tea.WithInput(in), tea.WithOutput(out), tea.WithWindowSize(100, 30),
 		tea.WithoutSignals(), tea.WithColorProfile(colorprofile.TrueColor), tea.WithFilter(Filter),
 		tea.WithEnvironment([]string{"TERM=xterm-256color", "COLORTERM=truecolor"}))
 	done := make(chan error, 1)
@@ -141,4 +147,17 @@ func TestRawOutputThroughTheEmulator(t *testing.T) {
 		t.Fatal("the program did not quit")
 	}
 	screen.em.Close()
+}
+
+// onlcr does what a terminal driver's ONLCR output flag does. With no terminal for
+// input, Bubble Tea on Unix assumes cooked output and ends lines with a bare LF. The
+// real app always has a terminal, so Bubble Tea writes CR LF itself; this closes the
+// gap in the test, not in the app.
+type onlcr struct{ w io.Writer }
+
+func (o onlcr) Write(p []byte) (int, error) {
+	if _, err := o.w.Write(bytes.ReplaceAll(p, []byte("\n"), []byte("\r\n"))); err != nil {
+		return 0, err
+	}
+	return len(p), nil
 }

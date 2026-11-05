@@ -50,8 +50,13 @@ def read_token(data_dir: str) -> str:
         raise CheckFailed(f"The local token could not be read from {path}: {error}") from None
 
 
-def wait_for_state(url: str, token: str, expected: str, limit_s: float) -> dict:
-    """Poll /v1/status. Warm-up on a slow computer takes minutes, so `starting` is normal."""
+def wait_for_state(url: str, token: str, expected: str, limit_s: float, reason: str | None = None) -> dict:
+    """Poll /v1/status. Warm-up on a slow computer takes minutes, so `starting` is normal.
+
+    With `reason`, a passing state with another reason, such as `provider_unreachable`
+    while Ollama is slow to answer the first poll, is waited out too. At the deadline
+    the last matching state is returned, so the caller can name the wrong reason.
+    """
     deadline = time.monotonic() + limit_s
     last = None
     view: dict = {}
@@ -64,9 +69,11 @@ def wait_for_state(url: str, token: str, expected: str, limit_s: float) -> dict:
         if view.get("state") != last:
             last = view.get("state")
             print(f"Status: {last}", flush=True)
-        if last == expected:
+        if last == expected and (reason is None or view.get("reason") == reason):
             return view
         if time.monotonic() >= deadline:
+            if last == expected:
+                return view
             raise CheckFailed(f"The status never became {expected!r}. The last reply was:\n{json.dumps(view, indent=2)}")
         time.sleep(1.0)
 
@@ -186,7 +193,7 @@ def run_cloud_on(args: argparse.Namespace, url: str, token: str) -> None:
     ollama = args.ollama_url.rstrip("/")
     check_cloud_on(read_json(f"{ollama}/api/status"))
     print("Ollama reports cloud access on.", flush=True)
-    check_refused_status(wait_for_state(url, token, "unavailable", args.wait))
+    check_refused_status(wait_for_state(url, token, "unavailable", args.wait, reason="cloud_access_enabled"))
     print("Status is unavailable with reason cloud_access_enabled.", flush=True)
     check_refusal(*send_refused_chat(url, token))
     print("The chat was refused with 503 model_not_permitted.", flush=True)

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -364,6 +365,9 @@ func TestDraggedPathsAttach(t *testing.T) {
 		"tilde windows": {"windows", `~\Remote Work.txt`},
 	} {
 		t.Run(name, func(t *testing.T) {
+			if c.platform == "windows" && runtime.GOOS != "windows" {
+				t.Skip("a backslash is part of a file name outside Windows")
+			}
 			if got := attachmentPath(c.typed, c.platform, home); filepath.Clean(got) != filepath.Clean(full) {
 				t.Errorf("%q became %q", c.typed, got)
 			}
