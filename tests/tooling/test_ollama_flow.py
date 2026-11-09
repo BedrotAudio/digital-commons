@@ -45,7 +45,12 @@ class FakeOllama:
 
             def do_POST(self):
                 outer.requests.append(("POST", self.path))
+                # Read the body first. Closing with it unread makes the operating system
+                # reset the connection, which macOS often does before the client has
+                # read the reply, so the gateway saw a dropped connection instead.
+                self.rfile.read(int(self.headers.get("Content-Length", 0)))
                 self.send_response(500)
+                self.send_header("Content-Length", "0")
                 self.end_headers()
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)

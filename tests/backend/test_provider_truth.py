@@ -40,6 +40,16 @@ def test_one_failed_inventory_is_not_reported_as_no_model(make, fake) -> None:
     wait_until(lambda: gateway.status()["state"] == "ready")
 
 
+def test_cloud_access_on_outranks_a_failed_inventory(make, fake) -> None:
+    """Ollama said plainly that cloud access is on. A later call that failed must not
+    hide that behind a vaguer "not responding"."""
+    fake.status_body = {"cloud": {"disabled": False, "source": "config"}}
+    fake.redirect_paths = {"/api/tags"}
+    gateway = make()
+    view = wait_until(lambda: (body := gateway.status())["state"] == "unavailable" and body)
+    assert view["reason"] == "cloud_access_enabled"
+
+
 def test_a_model_truly_missing_is_still_reported(make, fake) -> None:
     fake.tags = []
     gateway = make()

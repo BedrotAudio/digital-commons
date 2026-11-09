@@ -102,10 +102,12 @@ class StatusMonitor:
         health = self.health
         if health is None:
             return "starting", None
-        if not health.reachable:
-            return "unavailable", "provider_unreachable"
+        # A gate that answered "cloud access on" is certain and says what to fix, so a
+        # later call that failed in the same check must not hide it.
         if health.cloud_gate is False:
             return "unavailable", "cloud_access_enabled"
+        if not health.reachable:
+            return "unavailable", "provider_unreachable"
         enabled = self._registry.enabled()
         usable = self.usable_tiers()
         if not usable:
