@@ -111,6 +111,52 @@ and exits with code 1. It takes two flags:
 `stop` only stops a gateway that `dc.py` started. If something else answers on the
 port it says so and leaves it alone.
 
+## Building the installers
+
+```
+python installer/build.py
+```
+
+This builds the installer for the computer it runs on, because the private Python and
+its packages are native code: on Windows `dist/DigitalCommons-<version>-windows-x64-setup.exe`,
+and on a Mac `dist/DigitalCommons-<version>-macos-arm64.dmg` or `-macos-x64.dmg`. The
+version comes from `backend/app/__init__.py`. It needs Go, network access, and on
+Windows Inno Setup 6 (`ISCC.exe`, found in its usual places or through `ISCC`).
+`--stage-only` stops after `build/<target>/Digital Commons`, the folder that gets
+installed.
+
+What goes in:
+
+- `runtime/`: a relocatable Python 3.12 from python-build-standalone, checked against the
+  SHA-256 pinned in `installer/build.py`, with `backend/requirements.txt` installed into it
+  and pip, Tk and IDLE removed. `dc.py` uses it in place of `backend/.venv` whenever the
+  folder exists.
+- `bin/`: the terminal, built with CGO off.
+- `dc.py`, `backend/app` compiled ahead, `config/`, `data/sample_documents`, `docs/` and
+  `README.md`. No Go source, so `dc.py` never tries to rebuild the terminal.
+- An icon drawn by the build script, so the repository holds no image files.
+
+The Windows installer (`installer/windows/DigitalCommons.iss`) installs for the current
+user under `%LOCALAPPDATA%\Programs\Digital Commons` and adds a Start menu shortcut that
+runs `runtime\python.exe dc.py start`. It stops a running gateway before an update or an
+uninstall, and the uninstaller asks, defaulting to no, whether to delete the data folder.
+The Mac disk image holds `Digital Commons.app`, whose launcher (`installer/macos/launcher.sh`)
+clears the downloaded-file flag on its own bundle and opens `start.command` in Terminal.
+
+`dc.py start` is the first-start step described in the README. It downloads Ollama only
+from the fixed addresses in `OLLAMA_DOWNLOADS` in `dc.py`, with curl, over HTTPS only, and
+runs or installs it only if Windows reports a valid Authenticode signature from
+Ollama Inc., or `codesign` reports a valid Developer ID signature from Ollama that chains
+to Apple's root. The model download goes through Ollama's own `/api/pull`. Nothing is
+done without a yes, unless `--yes` was given.
+
+`.github/workflows/installers.yml` builds all three on every push to `main`, installs each
+on a clean GitHub machine, runs it in a real console in demo mode, runs a first start
+there that has to install Ollama and a small model, checks one real chat through the
+installed gateway, and on Windows uninstalls it again. Pushing a tag such as `v0.1.0`
+also makes a draft release with the three installers attached. A person checks the draft
+and publishes it. Nothing is code-signed yet.
+
 ## Configuration
 
 | File | What it holds |

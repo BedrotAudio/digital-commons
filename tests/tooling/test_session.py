@@ -35,9 +35,10 @@ def session(tmp_path, monkeypatch):
 
     seen: dict = {}
 
-    def stand_in(env, extra=()):
+    def stand_in(env, extra=(), config=dc.TERMINAL_CONFIG):
         seen["env"] = dict(env)
         seen["extra"] = list(extra)
+        seen["config"] = config
         seen["healthy"] = dc.gateway_healthy(url)
         seen["record"] = dc.read_record(data)
         seen["token"] = Path(env["DC_DATA_DIR"], "local-token").is_file()
@@ -170,3 +171,8 @@ def test_dev_will_not_borrow_a_demo_gateway(session):
     finally:
         dc.stop_process(record, process)
         dc.clear_record(data)
+
+
+def test_dev_gives_the_terminal_the_project_settings(session):
+    dc.run_session("dev")
+    assert session["config"] == dc.TERMINAL_CONFIG

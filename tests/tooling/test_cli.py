@@ -12,7 +12,7 @@ from conftest import ROOT, free_port
 
 import dc
 
-COMMANDS = ["setup", "backend", "frontend", "dev", "demo", "test", "build", "stop", "clean", "doctor"]
+COMMANDS = ["setup", "start", "backend", "frontend", "dev", "demo", "test", "build", "stop", "clean", "doctor"]
 
 
 def run(*args, env=None):

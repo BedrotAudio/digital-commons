@@ -1,0 +1,19 @@
+Digital Commons is beta software. It is not approved for production use or for sensitive data.
+
+Digital Commons runs an AI assistant on this computer. Your conversations are not sent to any outside AI service.
+
+What happens when it first starts
+
+Digital Commons needs Ollama, a free program that runs the AI model on this computer. When Digital Commons first starts, it asks before each of these steps:
+
+1. If Ollama is not installed, it downloads Ollama's own installer from ollama.com (about 1.7 GB), checks that it is signed by Ollama Inc., and installs it.
+
+2. If Ollama's cloud access is on, it turns it off and restarts Ollama, so that Ollama cannot pass a conversation to a remote service.
+
+3. If the AI model is not downloaded yet, it downloads it (about 8 GB).
+
+Each step is skipped when it is already done. Allow time and disk space for the downloads.
+
+No administrator rights are needed. Digital Commons is installed for your account only. Uninstall it from Settings, Apps. You will be asked whether to keep your conversations.
+
+This installer is not code-signed yet, so Windows may show "Windows protected your PC". Choose More info, then Run anyway, only if you downloaded it from the Digital Commons project.

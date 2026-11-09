@@ -71,6 +71,7 @@ import re
 import signal
 import socket
 import subprocess
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -101,6 +102,20 @@ CROSS_TARGETS = (
     ("macOS amd64", "darwin", "amd64", "digital-commons-macos-amd64"),
     ("Windows amd64", "windows", "amd64", "digital-commons-windows-amd64.exe"),
 )
+# The private Python an installer ships, in place of backend/.venv.
+RUNTIME = ROOT / "runtime"
+
+# Where `start` gets Ollama when it is missing, and the publisher the download must be
+# signed by. The signer is the one on Ollama's own releases for each platform.
+OLLAMA_DOWNLOADS = {
+    "win32": ("https://ollama.com/download/OllamaSetup.exe", "OllamaSetup.exe", "about 1.7 GB"),
+    "darwin": ("https://ollama.com/download/Ollama-darwin.zip", "Ollama-darwin.zip", "about 230 MB"),
+}
+OLLAMA_WINDOWS_SIGNER = ("CN=Ollama Inc.", "O=Ollama Inc.")
+OLLAMA_MAC_AUTHORITY = "Developer ID Application: Ollama"
+OLLAMA_START_WAIT_S = 90.0
+OLLAMA_STOP_WAIT_S = 15.0
+
 ENDPOINT_HINT = (
     "If endpoint protection software quarantined the file, restore it and see "
     '"Endpoint protection" in README.md.'
@@ -724,7 +739,18 @@ def venv_python(venv: Path = VENV, windows: bool = WINDOWS) -> Path:
     return venv / "Scripts" / "python.exe" if windows else venv / "bin" / "python"
 
 
+def runtime_python(runtime: Path = RUNTIME, windows: bool = WINDOWS) -> Path:
+    """The installer's Python, in the layout python-build-standalone uses."""
+    return runtime / "python.exe" if windows else runtime / "bin" / "python3"
+
+
 def require_venv() -> Path:
+    """backend/.venv in a checkout, or the private Python in an installed copy."""
+    if RUNTIME.is_dir():
+        python = runtime_python(RUNTIME)
+        if not python.is_file():
+            raise ToolError(f"{python} is missing. Reinstall Digital Commons.")
+        return python
     python = venv_python()
     if not python.is_file():
         raise ToolError(f"{VENV} was not found. Run: {run_hint('setup')}")
@@ -1135,7 +1161,9 @@ def wait_for_gateway(
     print(f"Gateway ready after {time.monotonic() - started:.1f} s")
 
 
-def run_terminal(env: Mapping[str, str], extra: Iterable[str] = ()) -> int:
+def run_terminal(
+    env: Mapping[str, str], extra: Iterable[str] = (), config: Path = TERMINAL_CONFIG
+) -> int:
     """Run the terminal in the foreground.
 
     Standard handles are inherited, never piped: on Windows, resize events arrive
@@ -1143,7 +1171,7 @@ def run_terminal(env: Mapping[str, str], extra: Iterable[str] = ()) -> int:
     """
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
         print("Warning: this is not an interactive console, so the terminal may not start.")
-    command = [str(BINARY), "--config", str(TERMINAL_CONFIG), *extra]
+    command = [str(BINARY), "--config", str(config), *extra]
     try:
         process = subprocess.Popen(command, cwd=ROOT, env=env)
     except OSError as error:
@@ -1168,6 +1196,401 @@ def _wait_polling(process: subprocess.Popen) -> int:
     while process.poll() is None:
         time.sleep(0.1)
     return process.returncode
+
+
+# First start. `start` is what an installed copy runs: it makes sure Ollama is
+# installed, running and kept on this computer, and that the configured model is
+# downloaded, asking before each change, then opens Digital Commons. A step that is
+# already done is skipped, so it is safe to run every time.
+
+
+def ollama_app_locations(platform: str, home: Path, env: Mapping[str, str]) -> list[Path]:
+    """Where Ollama's own installers put it."""
+    if platform == "win32":
+        local = env.get("LOCALAPPDATA") or str(home / "AppData" / "Local")
+        return [Path(local) / "Programs" / "Ollama" / "ollama app.exe"]
+    if platform == "darwin":
+        return [Path("/Applications/Ollama.app"), home / "Applications" / "Ollama.app"]
+    return []
+
+
+def find_ollama(
+    platform: str = sys.platform,
+    home: Optional[Path] = None,
+    env: Mapping[str, str] = os.environ,
+    which: Callable[[str], Optional[str]] = shutil.which,
+) -> Optional[Path]:
+    for path in ollama_app_locations(platform, home or Path.home(), env):
+        if path.exists():
+            return path
+    found = which("ollama")
+    return Path(found) if found else None
+
+
+def start_ollama(app: Path, platform: str = sys.platform) -> None:
+    """Start Ollama as a program of its own, so it outlives this window."""
+    if platform == "darwin" and app.suffix == ".app":
+        subprocess.run(["open", "-g", str(app)], check=False)
+        return
+    # The Windows tray app starts the server itself. A bare command needs `serve`.
+    command = [str(app)] if app.name.lower() == "ollama app.exe" else [str(app), "serve"]
+    options: dict = {}
+    if platform == "win32":
+        options["creationflags"] = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+    else:
+        options["start_new_session"] = True
+    subprocess.Popen(
+        command,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        close_fds=True,
+        **options,
+    )
+
+
+def stop_ollama(platform: str = sys.platform) -> None:
+    """Quit Ollama so that it reads its settings again. Only after the person agreed."""
+    if platform == "win32":
+        taskkill = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "taskkill.exe"
+        for image in ("ollama app.exe", "ollama.exe"):
+            subprocess.run([str(taskkill), "/IM", image, "/F"], capture_output=True)
+    elif platform == "darwin":
+        subprocess.run(["osascript", "-e", 'tell application "Ollama" to quit'], capture_output=True)
+        subprocess.run(["pkill", "-x", "ollama"], capture_output=True)
+
+
+def server_fallback(app: Path) -> Optional[Path]:
+    """The bare server inside an Ollama app, for when the app cannot start one, as on a
+    computer with no one signed in to its desktop."""
+    if app.name.lower() == "ollama app.exe":
+        candidate = app.with_name("ollama.exe")
+    elif app.suffix == ".app":
+        candidate = app / "Contents" / "Resources" / "ollama"
+    else:
+        return None
+    return candidate if candidate.is_file() else None
+
+
+def ollama_answers(url: str) -> bool:
+    return http_get(f"{url}/api/version", timeout=2.0)[0] == 200
+
+
+def wait_for_ollama(url: str, up: bool, limit_s: float) -> bool:
+    """Wait until Ollama answers, or until it has stopped answering."""
+    deadline = time.monotonic() + limit_s
+    while time.monotonic() < deadline:
+        if ollama_answers(url) == up:
+            return True
+        time.sleep(1.0)
+    return ollama_answers(url) == up
+
+
+def download(url: str, target: Path) -> None:
+    """HTTPS only, through curl, which uses the system's own certificate store."""
+    curl = shutil.which("curl")
+    if curl is None and WINDOWS:
+        curl = str(Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "curl.exe")
+    if curl is None:
+        raise ToolError("curl was not found, so Ollama cannot be downloaded. Install it from https://ollama.com/download")
+    command = [
+        curl, "--fail", "--location", "--proto", "=https", "--proto-redir", "=https",
+        "--progress-bar", "--output", str(target), url,
+    ]
+    if subprocess.run(command).returncode != 0 or not target.is_file():
+        raise ToolError(
+            f"The download from {url} did not finish. Check the internet connection and try "
+            "again, or install Ollama yourself from https://ollama.com/download"
+        )
+
+
+_SIGNATURE_COMMAND = (
+    "$s = Get-AuthenticodeSignature -LiteralPath $env:DC_SIGNED_FILE; "
+    "[string]$s.Status; [string]$s.SignerCertificate.Subject"
+)
+
+
+def windows_signer_ok(status: str, subject: str) -> bool:
+    """Windows trusts the certificate chain, and the subject names Ollama Inc."""
+    parts = [part.strip() for part in subject.split(",")]
+    return status.strip() == "Valid" and all(name in parts for name in OLLAMA_WINDOWS_SIGNER)
+
+
+def verify_windows_download(path: Path) -> None:
+    powershell = (
+        Path(os.environ.get("SystemRoot", r"C:\Windows"))
+        / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+    )
+    result = subprocess.run(
+        [str(powershell), "-NoProfile", "-NonInteractive", "-Command", _SIGNATURE_COMMAND],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "DC_SIGNED_FILE": str(path)},
+    )
+    status, subject = (result.stdout.splitlines() + ["", ""])[:2]
+    if not windows_signer_ok(status, subject):
+        raise ToolError(
+            f"The downloaded Ollama installer is not signed by Ollama Inc. (status "
+            f"{status or 'unknown'}: {subject or 'no signer'}), so it was not run. Install "
+            "Ollama yourself from https://ollama.com/download"
+        )
+
+
+def mac_authority_ok(details: str) -> bool:
+    """Read `codesign -dv --verbose=2`: the signer first, Apple's root last."""
+    authorities = [line.split("=", 1)[1] for line in details.splitlines() if line.startswith("Authority=")]
+    return (
+        len(authorities) >= 2
+        and authorities[0].startswith(OLLAMA_MAC_AUTHORITY)
+        and authorities[-1] == "Apple Root CA"
+    )
+
+
+def verify_mac_app(app: Path) -> None:
+    check = subprocess.run(["codesign", "--verify", "--deep", "--strict", str(app)], capture_output=True, text=True)
+    details = subprocess.run(["codesign", "-dv", "--verbose=2", str(app)], capture_output=True, text=True).stderr
+    for line in details.splitlines():
+        if line.startswith(("Authority=", "TeamIdentifier=")):
+            print(f"  {line}")
+    if check.returncode != 0 or not mac_authority_ok(details):
+        raise ToolError(
+            "The downloaded Ollama is not signed by Ollama with an Apple Developer ID, so it "
+            "was not installed. Install it yourself from https://ollama.com/download"
+        )
+
+
+def install_ollama(platform: str = sys.platform, home: Optional[Path] = None) -> Path:
+    """Download Ollama's own installer, check its publisher, and install it."""
+    url, name, size = OLLAMA_DOWNLOADS[platform]
+    home = home or Path.home()
+    with tempfile.TemporaryDirectory(prefix="dc-ollama-") as folder:
+        package = Path(folder) / name
+        print(f"\nDownloading Ollama ({size}) from {url}")
+        download(url, package)
+        if platform == "win32":
+            verify_windows_download(package)
+            print("The download is signed by Ollama Inc. Installing Ollama.")
+            code = subprocess.run(
+                [str(package), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-"]
+            ).returncode
+            if code != 0:
+                raise ToolError(f"The Ollama installer stopped with code {code}.")
+        else:
+            subprocess.run(["ditto", "-x", "-k", str(package), folder], check=True)
+            app = Path(folder) / "Ollama.app"
+            verify_mac_app(app)
+            print("The download is signed by Ollama. Installing Ollama.")
+            applications = Path("/Applications")
+            target = applications if os.access(applications, os.W_OK) else home / "Applications"
+            target.mkdir(exist_ok=True)
+            subprocess.run(["ditto", str(app), str(target / "Ollama.app")], check=True)
+    found = find_ollama(platform, home)
+    if found is None:
+        raise ToolError("Ollama was installed but cannot be found. Start it yourself, then open Digital Commons again.")
+    print(f"Ollama is installed: {found}")
+    return found
+
+
+def pull_progress(event: Mapping[str, object]) -> tuple[str, tuple[str, int]]:
+    """A line for one /api/pull event, and a key that changes every tenth of a layer."""
+    status = str(event.get("status", ""))
+    total, completed = event.get("total"), event.get("completed")
+    if isinstance(total, int) and total > 0 and isinstance(completed, int):
+        share = min(max(completed / total, 0.0), 1.0)
+        bar = "#" * int(share * 30)
+        line = f"  [{bar:<30}] {share:4.0%}  {completed / 1e9:.1f} of {total / 1e9:.1f} GB"
+        return line, (status, int(share * 10))
+    return f"  {status}", (status, -1)
+
+
+def pull_model(url: str, name: str) -> None:
+    """Have Ollama download a model, showing its progress."""
+    body = json.dumps({"model": name, "stream": True}).encode()
+    request = urllib.request.Request(
+        f"{url}/api/pull", data=body, headers={"Content-Type": "application/json"}, method="POST"
+    )
+    live = sys.stdout.isatty()
+    last_key: Optional[tuple[str, int]] = None
+    done = False
+    try:
+        # Verifying a large file can take minutes with nothing sent, hence the timeout.
+        with _OPENER.open(request, timeout=900) as response:
+            for raw in response:
+                try:
+                    event = json.loads(raw)
+                except ValueError:
+                    continue
+                if not isinstance(event, dict):
+                    continue
+                if event.get("error"):
+                    raise ToolError(f"Ollama could not download {name}: {event['error']}")
+                done = done or event.get("status") == "success"
+                line, key = pull_progress(event)
+                if live:
+                    print("\r" + line.ljust(72), end="", flush=True)
+                elif key != last_key:
+                    print(line)
+                last_key = key
+    except (urllib.error.URLError, OSError) as error:
+        raise ToolError(f"Ollama stopped answering while downloading {name}: {error}") from None
+    if live:
+        print()
+    if not done:
+        raise ToolError(f"The download of {name} did not finish. Open Digital Commons again to continue it.")
+    print(f"Downloaded {name}.")
+
+
+@dataclass
+class OllamaOps:
+    """What `prepare` does to the computer, gathered so that tests can stand in for it."""
+
+    find: Callable[[], Optional[Path]] = find_ollama
+    install: Callable[[], Path] = install_ollama
+    start: Callable[[Path], None] = start_ollama
+    stop: Callable[[], None] = stop_ollama
+    wait: Callable[[str, bool, float], bool] = wait_for_ollama
+    pull: Callable[[str, str], None] = pull_model
+
+
+def start_and_wait(ops: OllamaOps, app: Path, url: str) -> bool:
+    ops.start(app)
+    if ops.wait(url, True, OLLAMA_START_WAIT_S):
+        return True
+    fallback = server_fallback(app)
+    if fallback is None:
+        return False
+    print("Ollama's app did not start its service, so the service is being started directly.")
+    ops.start(fallback)
+    return ops.wait(url, True, OLLAMA_START_WAIT_S)
+
+
+def confirm(question: str, assume_yes: bool, interactive: bool, ask: Callable[[str], str]) -> bool:
+    if assume_yes:
+        print(f"{question} Yes, as asked in advance.")
+        return True
+    if not interactive:
+        print(f"{question}\nNothing was changed, because there is nobody here to answer.")
+        return False
+    try:
+        answer = ask(f"{question} [Y/n] ")
+    except EOFError:
+        return False
+    return answer.strip().lower() in ("", "y", "yes")
+
+
+def prepare(
+    settings: Settings,
+    assume_yes: bool,
+    interactive: bool,
+    ask: Callable[[str], str] = input,
+    ops: Optional[OllamaOps] = None,
+    platform: str = sys.platform,
+    server_json: Optional[Path] = None,
+) -> list[str]:
+    """Bring Ollama to a working state, asking before each change. Returns what is
+    still wrong, in plain words."""
+    if settings.provider != "ollama":
+        return []
+    ops = ops or OllamaOps()
+    server_json = server_json or Path.home() / ".ollama" / "server.json"
+    url = settings.ollama_url
+    print("Checking Ollama, which runs the AI model on this computer.")
+
+    if not ollama_answers(url):
+        app = ops.find()
+        if app is None:
+            if platform not in OLLAMA_DOWNLOADS:
+                return ["Ollama is not installed. Install it from https://ollama.com/download"]
+            question = (
+                "\nOllama is not installed. Download it from ollama.com "
+                f"({OLLAMA_DOWNLOADS[platform][2]}), check that Ollama Inc. signed it, and "
+                "install it now?"
+            )
+            if not confirm(question, assume_yes, interactive, ask):
+                return [
+                    "Ollama is not installed, so chat will not work. Open Digital Commons again "
+                    "to install it, or install it from https://ollama.com/download"
+                ]
+            app = ops.install()
+        print("Starting Ollama")
+        if not start_and_wait(ops, app, url):
+            return ["Ollama did not start. Start it yourself, then open Digital Commons again."]
+
+    problems: list[str] = []
+    state, detail = interpret_cloud_status(*http_get(f"{url}/api/status"))
+    if state == "unknown":
+        problems.append(
+            f"Ollama did not report its cloud setting ({detail}), so Digital Commons will not "
+            "use it. Update Ollama from https://ollama.com/download"
+        )
+    elif state == "not_disabled":
+        print("\nOllama cloud access is on.\n\n" + explain_cloud_change(server_json))
+        if confirm("\nTurn off Ollama cloud access and restart Ollama now?", assume_yes, interactive, ask):
+            backup = merge_server_json(server_json)
+            print(f"Updated {server_json}")
+            if backup is not None:
+                print(f"Saved the previous version as {backup}")
+            print("Restarting Ollama")
+            ops.stop()
+            ops.wait(url, False, OLLAMA_STOP_WAIT_S)
+            app = ops.find()
+            restarted = app is not None and start_and_wait(ops, app, url)
+            if not restarted or interpret_cloud_status(*http_get(f"{url}/api/status"))[0] != "disabled":
+                problems.append(ollama_restart_note(platform))
+            else:
+                print("Ollama cloud access is off.")
+        else:
+            problems.append("Ollama cloud access is on, so chat will not work until it is turned off.")
+    elif state == "disabled":
+        print("Ollama cloud access is off.")
+
+    tags = read_json(f"{url}/api/tags")
+    if tags is None:
+        problems.append("Ollama did not list its models. Open Digital Commons again in a moment.")
+        return problems
+    missing, remote = compare_models(settings.models, tags)
+    for name in remote:
+        problems.append(f"The model {name} points to a remote service. Remove it with: ollama rm {name}")
+    for name in missing:
+        question = f"\nThe AI model {name} is not downloaded yet. It is several gigabytes. Download it now?"
+        if confirm(question, assume_yes, interactive, ask):
+            print(f"Downloading {name}. This can take a long time. Leave this window open.")
+            ops.pull(url, name)
+        else:
+            problems.append(f"The AI model {name} is not downloaded, so chat will not work. Open Digital Commons again to download it.")
+    if not missing and not remote:
+        print("The AI model is ready: " + ", ".join(settings.models))
+    return problems
+
+
+def user_terminal_config(data: Path) -> Path:
+    """An installed copy keeps the terminal's settings, and the choices saved beside them,
+    in the person's data folder: they survive an update, and a Mac app cannot write
+    inside itself."""
+    target = data / "terminal.yaml"
+    if not target.is_file():
+        make_private_dir(data)
+        shutil.copyfile(TERMINAL_CONFIG, target)
+    return target
+
+
+def set_window_title(title: str) -> None:
+    if WINDOWS:
+        import ctypes
+
+        ctypes.windll.kernel32.SetConsoleTitleW(title)
+    elif sys.stdout.isatty():
+        sys.stdout.write(f"\033]0;{title}\007")
+        sys.stdout.flush()
+
+
+def pause_before_closing() -> None:
+    """A window opened from a shortcut closes when this ends, taking the message with it."""
+    if sys.stdin.isatty():
+        try:
+            input("\nPress Enter to close this window.")
+        except EOFError:
+            pass
 
 
 # Commands
@@ -1219,8 +1642,8 @@ def existing_gateway(settings: Settings, data: Path, mode: str) -> Optional[Gate
     return record or "unmanaged"
 
 
-def run_session(mode: str) -> int:
-    """dev and demo: gateway in the background, terminal in the foreground."""
+def run_session(mode: str, terminal_config: Path = TERMINAL_CONFIG) -> int:
+    """dev, demo and start: gateway in the background, terminal in the foreground."""
     settings = load_settings(os.environ)
     data = data_folder(settings)
     run_data = data / "demo" if mode == "demo" else data
@@ -1246,7 +1669,9 @@ def run_session(mode: str) -> int:
         else:
             print(f"Using the gateway already running at {settings.gateway_url}. It will be left running.")
             wait_for_gateway(settings.gateway_url)
-        code = run_terminal(terminal_env(settings, env), ["--gateway", settings.gateway_url])
+        code = run_terminal(
+            terminal_env(settings, env), ["--gateway", settings.gateway_url], terminal_config
+        )
     except KeyboardInterrupt:
         code = 130
     finally:
@@ -1260,6 +1685,31 @@ def run_session(mode: str) -> int:
 
 def cmd_dev(args: argparse.Namespace) -> int:
     return run_session("dev")
+
+
+def cmd_start(args: argparse.Namespace) -> int:
+    set_window_title("Digital Commons")
+    try:
+        settings = load_settings(os.environ)
+        problems = prepare(settings, assume_yes=args.yes, interactive=sys.stdin.isatty())
+        if problems:
+            print("\nNot everything is ready:")
+            for problem in problems:
+                print(f"- {problem}")
+        if args.prepare_only:
+            return 1 if problems else 0
+        if problems:
+            print("\nDigital Commons will open, but chat will not work until this is fixed.")
+        config = user_terminal_config(data_folder(settings)) if RUNTIME.is_dir() else TERMINAL_CONFIG
+        code = run_session("dev", config)
+    except ToolError as error:
+        print(f"\nError: {error}", file=sys.stderr)
+        code = 1
+    except KeyboardInterrupt:
+        return 130
+    if code not in (0, 130):
+        pause_before_closing()
+    return code
 
 
 def cmd_demo(args: argparse.Namespace) -> int:
@@ -1491,7 +1941,9 @@ def doctor_checks() -> list[Check]:
     checks.append(Check("ok" if good else "FAIL", "Python", f"{version} at {sys.executable}"))
 
     go = find_go(os.environ.get("PATH"), ROOT, WINDOWS)
-    if go is None:
+    if not TERMINAL.is_dir():
+        checks.append(Check("info", "Go", "not needed, because the terminal comes built"))
+    elif go is None:
         checks.append(Check("FAIL", "Go", f"not found. Install with: {go_install_instruction(sys.platform)}"))
     else:
         found = go_version(go)
@@ -1503,15 +1955,18 @@ def doctor_checks() -> list[Check]:
         else:
             checks.append(Check("ok", "Go", f"{found} at {go}"))
 
-    python = venv_python()
+    installed = RUNTIME.is_dir()
+    python = runtime_python(RUNTIME) if installed else venv_python()
+    where = RUNTIME if installed else VENV
     if not python.is_file():
-        checks.append(Check("FAIL", "Environment", f"{VENV} not found. Run: {run_hint('setup')}"))
+        fix = "Reinstall Digital Commons." if installed else f"Run: {run_hint('setup')}"
+        checks.append(Check("FAIL", "Environment", f"{python} not found. {fix}"))
     else:
         probe = subprocess.run(
             [str(python), "-c", "import fastapi, uvicorn"], capture_output=True, text=True
         )
         if probe.returncode == 0:
-            checks.append(Check("ok", "Environment", f"{VENV}, packages installed"))
+            checks.append(Check("ok", "Environment", f"{where}, packages installed"))
         else:
             checks.append(Check("FAIL", "Environment", f"packages missing. Run: {run_hint('setup')}"))
 
@@ -1587,6 +2042,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 
 COMMANDS = (
     ("setup", cmd_setup, "create the Python environment, build the terminal, check Ollama"),
+    ("start", cmd_start, "install Ollama and the model if needed, then open Digital Commons"),
     ("dev", cmd_dev, "start the gateway in the background and open the terminal"),
     ("demo", cmd_demo, "as dev, with simulated replies, no model and no Ollama"),
     ("backend", cmd_backend, "run the gateway in the foreground"),
@@ -1614,6 +2070,15 @@ def build_parser() -> argparse.ArgumentParser:
                 "--disable-ollama-cloud",
                 action="store_true",
                 help="answer yes in advance to turning off Ollama cloud access",
+            )
+        if name == "start":
+            command.add_argument(
+                "--yes", action="store_true", help="answer yes in advance to every question"
+            )
+            command.add_argument(
+                "--prepare-only",
+                action="store_true",
+                help="set Ollama and the model up, then stop without opening Digital Commons",
             )
         if name == "build":
             command.add_argument(

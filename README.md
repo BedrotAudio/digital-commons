@@ -21,6 +21,51 @@ for sensitive data, and it makes no claim of compliance with any government
 framework.** Running a model locally does not by itself make an application secure
 or compliant. See [Privacy](#privacy) and [docs/security.md](docs/security.md).
 
+## Install
+
+The installers need no Python, Go or command line. Download the one for your computer
+from the project's [Releases](https://github.com/BedrotAudio/digital-commons/releases)
+page. Until a release is published, the newest ones are attached to each run of the
+**Installers** workflow on the [Actions](https://github.com/BedrotAudio/digital-commons/actions/workflows/installers.yml)
+page.
+
+| Computer | File |
+|---|---|
+| Windows 10 or 11 (64-bit) | `DigitalCommons-<version>-windows-x64-setup.exe` |
+| Mac with Apple Silicon (M1 or later) | `DigitalCommons-<version>-macos-arm64.dmg` |
+| Mac with an Intel chip | `DigitalCommons-<version>-macos-x64.dmg` |
+
+**Windows.** Run the setup file. It installs for your account only and does not ask for
+administrator rights. Windows may say "Windows protected your PC", because the installer
+is not code-signed yet: choose **More info**, then **Run anyway**. Then open
+**Digital Commons** from the Start menu.
+
+**Mac.** Open the disk image and drag **Digital Commons** into **Applications**. The app
+is not signed by Apple yet, so the first time you open it macOS refuses. Open
+**System Settings**, then **Privacy & Security**, and choose **Open Anyway** next to
+Digital Commons. It opens in Terminal.
+
+**The first start** finishes the setup in that window, asking before each step:
+
+1. If Ollama, which runs the AI model, is not installed, it downloads Ollama's own
+   installer from ollama.com (about 1.7 GB on Windows, 230 MB on a Mac), checks that it
+   is signed by Ollama Inc., and installs it.
+2. If Ollama's cloud access is on, it turns it off and restarts Ollama. See
+   [Ollama cloud access](#ollama-cloud-access).
+3. If the AI model is not downloaded, it downloads it (about 8 GB), showing progress.
+
+Each step is skipped once it is done, so later starts go straight to Digital Commons.
+Your conversations and settings are kept in the [data folder](#project-layout), not in
+the installed program.
+
+**Removing it.** On Windows, uninstall Digital Commons from **Settings**, **Apps**. It
+asks whether to delete your conversations too, and keeps them unless you say yes. On a
+Mac, drag the app to the Trash, and delete `~/Library/Application Support/DigitalCommons`
+if you want your conversations gone. Ollama and the model are separate programs and stay
+installed: remove them the same way if you no longer need them.
+
+To work on the code instead, follow the source install below.
+
 ## How it fits together
 
 ```
@@ -61,7 +106,7 @@ first time took about 200 seconds. Other hardware is untested.
 
 You do not need make, Node.js or Docker.
 
-## Install and start on Windows
+## Install from source on Windows
 
 Use Windows Terminal or PowerShell.
 
@@ -114,7 +159,7 @@ The folder also holds `dc.cmd`, so `.\dc dev` does the same as `python dc.py dev
 PowerShell and in Command Prompt. In Command Prompt, plain `dc dev` also works unless
 the computer is set to skip the current folder when looking for programs.
 
-## Install and start on macOS
+## Install from source on macOS
 
 GitHub's Mac machines run `python3 dc.py setup`, `doctor` and `test` successfully, but no person has followed these steps at a real Mac yet, and the Homebrew step is unverified. See [Platform status](#platform-status).
 
@@ -366,6 +411,7 @@ Run `python dc.py <command>` (`python3` on macOS), or `.\dc <command>` on Window
 | Command | What it does |
 |---|---|
 | `setup` | Create `backend/.venv`, install the packages, build the terminal, check Ollama and offer to turn off cloud access. Takes `--disable-ollama-cloud`. |
+| `start` | What the installed app runs. Install Ollama if it is missing, turn off its cloud access and download the model, asking before each step, then do the same as `dev`. Takes `--yes` to answer every question in advance and `--prepare-only` to stop before opening the terminal. |
 | `dev` | Start the gateway in the background, wait for it (up to 30 seconds), run the terminal in the foreground, and stop the gateway when the terminal exits. If a gateway is already running it is used and left running. |
 | `demo` | The same as `dev` with simulated replies and a separate `demo` data folder. No model needed. |
 | `backend` | Run the gateway in the foreground. Press Ctrl+C to stop it. |
