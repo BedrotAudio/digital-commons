@@ -146,8 +146,10 @@ clears the downloaded-file flag on its own bundle and opens `start.command` in T
 `dc.py start` is the first-start step described in the README. It downloads Ollama only
 from the fixed addresses in `OLLAMA_DOWNLOADS` in `dc.py`, with curl, over HTTPS only, and
 runs or installs it only if Windows reports a valid Authenticode signature from
-Ollama Inc., or `codesign` reports a valid Developer ID signature from Ollama that chains
-to Apple's root. The model download goes through Ollama's own `/api/pull`. Nothing is
+Ollama Inc., or `codesign` reports a valid Developer ID signature from Ollama's Apple team,
+`3MU9H2V9Y9`, chained to Apple's root. Apple lists that team under Ollama's earlier company
+name, Infra Technologies, Inc, so the check uses the team and not the name, which anyone can
+choose. The model download goes through Ollama's own `/api/pull`. Nothing is
 done without a yes, unless `--yes` was given.
 
 `.github/workflows/installers.yml` builds all three on every push to `main`, installs each

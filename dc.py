@@ -106,13 +106,15 @@ CROSS_TARGETS = (
 RUNTIME = ROOT / "runtime"
 
 # Where `start` gets Ollama when it is missing, and the publisher the download must be
-# signed by. The signer is the one on Ollama's own releases for each platform.
+# signed by, as each platform reports the signer on Ollama's own releases. On Windows
+# that is Ollama Inc. On macOS it is the Apple Developer ID team below, which Apple
+# lists under Ollama's earlier company name, Infra Technologies, Inc.
 OLLAMA_DOWNLOADS = {
     "win32": ("https://ollama.com/download/OllamaSetup.exe", "OllamaSetup.exe", "about 1.7 GB"),
     "darwin": ("https://ollama.com/download/Ollama-darwin.zip", "Ollama-darwin.zip", "about 230 MB"),
 }
 OLLAMA_WINDOWS_SIGNER = ("CN=Ollama Inc.", "O=Ollama Inc.")
-OLLAMA_MAC_AUTHORITY = "Developer ID Application: Ollama"
+OLLAMA_MAC_TEAM = "3MU9H2V9Y9"
 OLLAMA_START_WAIT_S = 90.0
 OLLAMA_STOP_WAIT_S = 15.0
 
@@ -1337,12 +1339,16 @@ def verify_windows_download(path: Path) -> None:
 
 
 def mac_authority_ok(details: str) -> bool:
-    """Read `codesign -dv --verbose=2`: the signer first, Apple's root last."""
-    authorities = [line.split("=", 1)[1] for line in details.splitlines() if line.startswith("Authority=")]
+    """Read `codesign -dv --verbose=2`: a Developer ID from Ollama's team, chained to
+    Apple's root. The team is checked rather than the name, which anyone can choose."""
+    lines = details.splitlines()
+    authorities = [line.split("=", 1)[1] for line in lines if line.startswith("Authority=")]
     return (
         len(authorities) >= 2
-        and authorities[0].startswith(OLLAMA_MAC_AUTHORITY)
+        and authorities[0].startswith("Developer ID Application: ")
+        and authorities[0].endswith(f"({OLLAMA_MAC_TEAM})")
         and authorities[-1] == "Apple Root CA"
+        and f"TeamIdentifier={OLLAMA_MAC_TEAM}" in lines
     )
 
 
@@ -1354,7 +1360,7 @@ def verify_mac_app(app: Path) -> None:
             print(f"  {line}")
     if check.returncode != 0 or not mac_authority_ok(details):
         raise ToolError(
-            "The downloaded Ollama is not signed by Ollama with an Apple Developer ID, so it "
+            "The downloaded Ollama is not signed with the Apple Developer ID of Ollama's team, so it "
             "was not installed. Install it yourself from https://ollama.com/download"
         )
 
@@ -1379,7 +1385,7 @@ def install_ollama(platform: str = sys.platform, home: Optional[Path] = None) ->
             subprocess.run(["ditto", "-x", "-k", str(package), folder], check=True)
             app = Path(folder) / "Ollama.app"
             verify_mac_app(app)
-            print("The download is signed by Ollama. Installing Ollama.")
+            print("The download carries the Apple Developer ID of Ollama's team. Installing Ollama.")
             applications = Path("/Applications")
             target = applications if os.access(applications, os.W_OK) else home / "Applications"
             target.mkdir(exist_ok=True)
@@ -1503,7 +1509,7 @@ def prepare(
                 return ["Ollama is not installed. Install it from https://ollama.com/download"]
             question = (
                 "\nOllama is not installed. Download it from ollama.com "
-                f"({OLLAMA_DOWNLOADS[platform][2]}), check that Ollama Inc. signed it, and "
+                f"({OLLAMA_DOWNLOADS[platform][2]}), check that it is signed by Ollama, and "
                 "install it now?"
             )
             if not confirm(question, assume_yes, interactive, ask):

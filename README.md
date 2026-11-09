@@ -49,7 +49,7 @@ Digital Commons. It opens in Terminal.
 
 1. If Ollama, which runs the AI model, is not installed, it downloads Ollama's own
    installer from ollama.com (about 1.7 GB on Windows, 230 MB on a Mac), checks that it
-   is signed by Ollama Inc., and installs it.
+   is signed by Ollama, and installs it. Anything signed by someone else is refused.
 2. If Ollama's cloud access is on, it turns it off and restarts Ollama. See
    [Ollama cloud access](#ollama-cloud-access).
 3. If the AI model is not downloaded, it downloads it (about 8 GB), showing progress.

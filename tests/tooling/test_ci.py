@@ -273,7 +273,7 @@ def gateway_on_fake_ollama(tmp_path):
     record = dc.GatewayRecord(process.pid, dc.process_start_time(process.pid), "dev", str(log))
     try:
         dc.wait_for_gateway(f"http://127.0.0.1:{port}", process, log, timeout=60)
-        yield SimpleNamespace(ollama=ollama, url=f"http://127.0.0.1:{port}", data=data)
+        yield SimpleNamespace(ollama=ollama, url=f"http://127.0.0.1:{port}", data=data, log=log)
     finally:
         dc.stop_process(record, process)
         ollama.close()
@@ -286,7 +286,10 @@ def cloud_on_check(rig):
 
 
 def test_the_cloud_on_check_passes_against_a_real_gateway(gateway_on_fake_ollama, capsys):
-    assert cloud_on_check(gateway_on_fake_ollama) == 0, capsys.readouterr().err
+    rig = gateway_on_fake_ollama
+    code = cloud_on_check(rig)
+    log = rig.log.read_text(encoding="utf-8", errors="replace")[-4000:] if rig.log.is_file() else ""
+    assert code == 0, f"{capsys.readouterr().err}\nrequests: {rig.ollama.requests}\ngateway log:\n{log}"
     assert ("POST", "/api/chat") not in gateway_on_fake_ollama.ollama.requests
     assert "Live check passed." in capsys.readouterr().out
 

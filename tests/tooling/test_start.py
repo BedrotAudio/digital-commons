@@ -144,7 +144,7 @@ def test_everything_missing_is_set_up_in_order(ollama, tmp_path):
     assert problems == []
     assert calls == ["install", "start", "stop", "start", f"pull {MODEL}"]
     assert len(asked) == 3
-    assert "Ollama Inc." in asked[0] and "1.7 GB" in asked[0]
+    assert "signed by Ollama" in asked[0] and "1.7 GB" in asked[0]
     assert "cloud access" in asked[1]
     assert MODEL in asked[2]
     assert json.loads(server_json.read_text()) == {"disable_ollama_cloud": True}
@@ -244,20 +244,26 @@ def test_only_ollama_inc_signatures_pass_on_windows(status, subject, expected):
     assert dc.windows_signer_ok(status, subject) is expected
 
 
+# What codesign reported for Ollama-darwin.zip on GitHub's Mac machines.
 MAC_DETAILS = """Executable=/tmp/Ollama.app/Contents/MacOS/Ollama
 Identifier=com.electron.ollama
-Authority=Developer ID Application: Ollama Inc. (ABCDE12345)
+Authority=Developer ID Application: Infra Technologies, Inc (3MU9H2V9Y9)
 Authority=Developer ID Certification Authority
 Authority=Apple Root CA
-TeamIdentifier=ABCDE12345
+TeamIdentifier=3MU9H2V9Y9
 """
 
 
-def test_only_ollama_developer_id_passes_on_a_mac():
+def test_only_ollamas_developer_team_passes_on_a_mac():
     assert dc.mac_authority_ok(MAC_DETAILS)
-    assert not dc.mac_authority_ok(MAC_DETAILS.replace("Ollama Inc.", "Someone Else"))
+    other_team = MAC_DETAILS.replace("3MU9H2V9Y9", "ABCDE12345")
+    assert not dc.mac_authority_ok(other_team)
+    # Anyone can choose a name, so a familiar one on another team still fails.
+    assert not dc.mac_authority_ok(other_team.replace("Infra Technologies, Inc", "Ollama Inc."))
+    assert not dc.mac_authority_ok(MAC_DETAILS.replace("TeamIdentifier=3MU9H2V9Y9", "TeamIdentifier=ABCDE12345"))
     assert not dc.mac_authority_ok("Signature=adhoc\nTeamIdentifier=not set\n")
     assert not dc.mac_authority_ok(MAC_DETAILS.replace("Apple Root CA", "Some Root"))
+    assert not dc.mac_authority_ok(MAC_DETAILS.replace("Developer ID Application", "Apple Development"))
 
 
 def test_pull_progress_reads_ollama_events():

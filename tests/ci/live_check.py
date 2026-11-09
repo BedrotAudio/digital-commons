@@ -148,7 +148,11 @@ def check_cloud_on(reply: object) -> None:
 def check_refused_status(view: dict) -> None:
     state, reason = view.get("state"), view.get("reason")
     if (state, reason) != ("unavailable", "cloud_access_enabled"):
-        raise CheckFailed(f"The status is {state!r} with reason {reason!r}, not unavailable with cloud_access_enabled.")
+        error = (view.get("inference") or {}).get("error")
+        raise CheckFailed(
+            f"The status is {state!r} with reason {reason!r}, not unavailable with "
+            f"cloud_access_enabled. The gateway's error was: {error!r}"
+        )
     kind = (view.get("locality") or {}).get("kind")
     if kind == "this_device":
         raise CheckFailed("The status claims this_device while cloud access is on.")
